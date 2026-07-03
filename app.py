@@ -120,7 +120,7 @@ with st.form("todo_form", clear_on_submit=not is_editing):
                 row = find_row_by_id(editing_todo["id"])
                 if row:
                     worksheet.update(
-                        f"A{row}:G{row}",
+                        f"A{row}:H{row}",
                         [
                             [
                                 editing_todo["id"],
@@ -130,6 +130,7 @@ with st.form("todo_form", clear_on_submit=not is_editing):
                                 due_date_str,
                                 now,
                                 "TRUE" if is_completed(editing_todo) else "FALSE",
+                                editing_todo["created_at"],
                             ]
                         ],
                     )
@@ -145,6 +146,7 @@ with st.form("todo_form", clear_on_submit=not is_editing):
                         due_date_str,
                         now,
                         "FALSE",
+                        now,
                     ]
                 )
             st.rerun()
@@ -161,20 +163,34 @@ active_todos = [t for t in todos_sorted if not is_completed(t)]
 completed_todos = [t for t in todos_sorted if is_completed(t)]
 
 
+def format_created_at(created_at_str: str) -> str:
+    if not created_at_str:
+        return ""
+    try:
+        created_at = datetime.strptime(created_at_str, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        try:
+            created_at = datetime.strptime(created_at_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return created_at_str
+    return created_at.strftime("%Y-%m-%d %H:%M")
+
+
 def render_todo_list(todo_list: list[dict]) -> None:
     if not todo_list:
         st.write("該当するTodoはありません。")
         return
 
-    header = st.columns([1, 2, 4, 2, 1.5])
+    header = st.columns([1, 2, 4, 2, 2, 1.5])
     header[0].write("**完了**")
     header[1].write("**タイトル**")
     header[2].write("**内容**")
     header[3].write("**期日**")
-    header[4].write("")
+    header[4].write("**登録日時**")
+    header[5].write("")
 
     for todo in todo_list:
-        cols = st.columns([1, 2, 4, 2, 1.5], vertical_alignment="center")
+        cols = st.columns([1, 2, 4, 2, 2, 1.5], vertical_alignment="center")
         completed = is_completed(todo)
 
         checked = cols[0].checkbox("", value=completed, key=f"done_{todo['id']}")
@@ -188,7 +204,8 @@ def render_todo_list(todo_list: list[dict]) -> None:
         cols[1].markdown(title_display)
         cols[2].write(todo["content"])
         cols[3].markdown(format_due_date(todo["due_date"], completed))
-        if cols[4].button("編集", key=f"edit_{todo['id']}", use_container_width=True):
+        cols[4].write(format_created_at(todo.get("created_at", "")))
+        if cols[5].button("編集", key=f"edit_{todo['id']}", use_container_width=True):
             st.session_state.editing_id = todo["id"]
             st.rerun()
 
