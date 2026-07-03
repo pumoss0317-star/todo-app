@@ -206,9 +206,9 @@ def render_todo_list(todo_list: list[dict]) -> None:
                 render_title_html(todo["title"], completed), unsafe_allow_html=True
             )
 
-            st.write(f"内容: {todo['content']}")
-            st.markdown(f"期日: {format_due_date(todo['due_date'], completed)}")
-            st.write(f"登録日時: {format_created_at(todo.get('created_at', ''))}")
+            st.write(todo["content"])
+            st.markdown(format_due_date(todo["due_date"], completed))
+            st.write(format_created_at(todo.get("created_at", "")))
 
             button_cols = st.columns([1, 1, 1, 5])
             if button_cols[0].button(
