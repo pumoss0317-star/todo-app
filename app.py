@@ -1,3 +1,4 @@
+import html
 import uuid
 from datetime import date, datetime
 
@@ -44,6 +45,8 @@ st.title("📝Todoアプリ")
 
 if "editing_id" not in st.session_state:
     st.session_state.editing_id = None
+if "confirm_delete_id" not in st.session_state:
+    st.session_state.confirm_delete_id = None
 
 
 def get_my_todos() -> list[dict]:
@@ -176,21 +179,29 @@ def format_created_at(created_at_str: str) -> str:
     return created_at.strftime("%Y-%m-%d %H:%M")
 
 
+def render_title_html(title: str, completed: bool) -> str:
+    escaped = html.escape(title)
+    if completed:
+        escaped = f"<s>{escaped}</s>"
+    return f"<span style='font-size:1.2em; font-weight:700'>{escaped}</span>"
+
+
 def render_todo_list(todo_list: list[dict]) -> None:
     if not todo_list:
         st.write("該当するTodoはありません。")
         return
 
-    header = st.columns([1, 2, 4, 2, 2, 1.5])
+    header = st.columns([1, 2, 4, 2, 2, 1.2, 1.4])
     header[0].write("**完了**")
     header[1].write("**タイトル**")
     header[2].write("**内容**")
     header[3].write("**期日**")
     header[4].write("**登録日時**")
     header[5].write("")
+    header[6].write("")
 
     for todo in todo_list:
-        cols = st.columns([1, 2, 4, 2, 2, 1.5], vertical_alignment="center")
+        cols = st.columns([1, 2, 4, 2, 2, 1.2, 1.4], vertical_alignment="center")
         completed = is_completed(todo)
 
         checked = cols[0].checkbox("", value=completed, key=f"done_{todo['id']}")
@@ -200,14 +211,34 @@ def render_todo_list(todo_list: list[dict]) -> None:
                 worksheet.update_cell(row, 7, "TRUE" if checked else "FALSE")
             st.rerun()
 
-        title_display = f"~~{todo['title']}~~" if completed else todo["title"]
-        cols[1].markdown(title_display)
+        cols[1].markdown(render_title_html(todo["title"], completed), unsafe_allow_html=True)
         cols[2].write(todo["content"])
         cols[3].markdown(format_due_date(todo["due_date"], completed))
         cols[4].write(format_created_at(todo.get("created_at", "")))
+
         if cols[5].button("編集", key=f"edit_{todo['id']}", use_container_width=True):
             st.session_state.editing_id = todo["id"]
             st.rerun()
+
+        if st.session_state.confirm_delete_id == todo["id"]:
+            confirm_cols = cols[6].columns(2)
+            if confirm_cols[0].button(
+                "削除する", key=f"confirm_delete_{todo['id']}", use_container_width=True
+            ):
+                row = find_row_by_id(todo["id"])
+                if row:
+                    worksheet.delete_rows(row)
+                st.session_state.confirm_delete_id = None
+                st.rerun()
+            if confirm_cols[1].button(
+                "取消", key=f"cancel_delete_{todo['id']}", use_container_width=True
+            ):
+                st.session_state.confirm_delete_id = None
+                st.rerun()
+        else:
+            if cols[6].button("削除", key=f"delete_{todo['id']}", use_container_width=True):
+                st.session_state.confirm_delete_id = todo["id"]
+                st.rerun()
 
 
 tab_active, tab_completed = st.tabs(
