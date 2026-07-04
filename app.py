@@ -1,6 +1,6 @@
 import html
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import truststore
 
@@ -9,6 +9,8 @@ truststore.inject_into_ssl()
 import gspread
 import streamlit as st
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 st.set_page_config(page_title="📝Todoアプリ", page_icon="✅")
 
@@ -24,21 +26,133 @@ if st.sidebar.button("ログアウト"):
     st.logout()
 
 
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/calendar",
+]
+
+
+@st.cache_resource
+def get_credentials():
+    return Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=SCOPES
+    )
+
+
 @st.cache_resource
 def get_worksheet():
-    creds = Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
-        scopes=[
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ],
-    )
-    gc = gspread.authorize(creds)
+    gc = gspread.authorize(get_credentials())
     sh = gc.open_by_key(st.secrets["sheets"]["spreadsheet_id"])
     return sh.sheet1
 
 
+REQUIRED_COLUMNS = [
+    "id",
+    "user_email",
+    "title",
+    "content",
+    "due_date",
+    "updated_at",
+    "completed",
+    "created_at",
+    "priority",
+    "category",
+    "calendar_event_id",
+]
+
+
+@st.cache_resource
+def ensure_schema(_worksheet):
+    headers = _worksheet.row_values(1)
+    for name in REQUIRED_COLUMNS:
+        if name not in headers:
+            headers.append(name)
+            _worksheet.update_cell(1, len(headers), name)
+    return True
+
+
+@st.cache_resource
+def get_calendar_service():
+    return build("calendar", "v3", credentials=get_credentials())
+
+
+def get_calendar_id() -> str | None:
+    return st.secrets.get("calendar", {}).get("calendar_id")
+
+
+def create_calendar_event(title: str, content: str, due_date_str: str) -> str:
+    calendar_id = get_calendar_id()
+    if not calendar_id or not due_date_str:
+        return ""
+    try:
+        due = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return ""
+    body = {
+        "summary": title,
+        "description": content,
+        "start": {"date": due_date_str},
+        "end": {"date": (due + timedelta(days=1)).isoformat()},
+    }
+    try:
+        event = (
+            get_calendar_service()
+            .events()
+            .insert(calendarId=calendar_id, body=body)
+            .execute()
+        )
+        return event["id"]
+    except HttpError:
+        st.warning("Googleカレンダーへの登録に失敗しました。")
+        return ""
+
+
+def update_calendar_event(
+    event_id: str, title: str, content: str, due_date_str: str
+) -> str:
+    calendar_id = get_calendar_id()
+    if not calendar_id:
+        return event_id
+    if not event_id:
+        return create_calendar_event(title, content, due_date_str)
+    if not due_date_str:
+        delete_calendar_event(event_id)
+        return ""
+    try:
+        due = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return event_id
+    body = {
+        "summary": title,
+        "description": content,
+        "start": {"date": due_date_str},
+        "end": {"date": (due + timedelta(days=1)).isoformat()},
+    }
+    try:
+        get_calendar_service().events().patch(
+            calendarId=calendar_id, eventId=event_id, body=body
+        ).execute()
+        return event_id
+    except HttpError:
+        st.warning("Googleカレンダーの更新に失敗しました。")
+        return event_id
+
+
+def delete_calendar_event(event_id: str) -> None:
+    calendar_id = get_calendar_id()
+    if not calendar_id or not event_id:
+        return
+    try:
+        get_calendar_service().events().delete(
+            calendarId=calendar_id, eventId=event_id
+        ).execute()
+    except HttpError:
+        pass
+
+
 worksheet = get_worksheet()
+ensure_schema(worksheet)
 user_email = st.user.email
 
 st.title("📝Todoアプリ")
@@ -64,6 +178,15 @@ def is_completed(todo: dict) -> bool:
 
 
 DUE_SOON_DAYS = 3
+
+PRIORITY_OPTIONS = ["高", "中", "低"]
+PRIORITY_ORDER = {"高": 0, "中": 1, "低": 2}
+PRIORITY_ICON = {"高": "🔴", "中": "🟡", "低": "🟢"}
+
+
+def priority_label(priority: str) -> str:
+    icon = PRIORITY_ICON.get(priority, "")
+    return f"{icon} {priority}" if priority else ""
 
 
 def format_due_date(due_date_str: str, completed: bool) -> str:
@@ -112,6 +235,18 @@ with st.form("todo_form", clear_on_submit=not is_editing):
             pass
     due_date = st.date_input("期日", value=default_date)
 
+    default_priority = editing_todo.get("priority") if is_editing else "中"
+    priority = st.selectbox(
+        "重要度",
+        PRIORITY_OPTIONS,
+        index=PRIORITY_OPTIONS.index(default_priority)
+        if default_priority in PRIORITY_OPTIONS
+        else 1,
+    )
+    category = st.text_input(
+        "カテゴリ", value=editing_todo.get("category", "") if is_editing else ""
+    )
+
     submitted = st.form_submit_button("更新" if is_editing else "登録")
 
     if submitted:
@@ -123,8 +258,14 @@ with st.form("todo_form", clear_on_submit=not is_editing):
             if is_editing:
                 row = find_row_by_id(editing_todo["id"])
                 if row:
+                    event_id = update_calendar_event(
+                        editing_todo.get("calendar_event_id", ""),
+                        title,
+                        content,
+                        due_date_str,
+                    )
                     worksheet.update(
-                        f"A{row}:H{row}",
+                        f"A{row}:K{row}",
                         [
                             [
                                 editing_todo["id"],
@@ -135,12 +276,16 @@ with st.form("todo_form", clear_on_submit=not is_editing):
                                 now,
                                 "TRUE" if is_completed(editing_todo) else "FALSE",
                                 editing_todo["created_at"],
+                                priority,
+                                category,
+                                event_id,
                             ]
                         ],
                     )
                 st.session_state.editing_id = None
             else:
                 new_id = str(uuid.uuid4())
+                event_id = create_calendar_event(title, content, due_date_str)
                 worksheet.append_row(
                     [
                         new_id,
@@ -151,6 +296,9 @@ with st.form("todo_form", clear_on_submit=not is_editing):
                         now,
                         "FALSE",
                         now,
+                        priority,
+                        category,
+                        event_id,
                     ]
                 )
             st.rerun()
@@ -162,7 +310,19 @@ if is_editing and st.button("編集をキャンセル"):
 # --- 一覧 ---
 st.subheader("Todo一覧")
 todos = get_my_todos()
-todos_sorted = sorted(todos, key=lambda t: t.get("due_date") or "9999-99-99")
+
+categories = sorted({t["category"] for t in todos if t.get("category")})
+selected_categories = st.multiselect("カテゴリで絞り込み", categories)
+if selected_categories:
+    todos = [t for t in todos if t.get("category") in selected_categories]
+
+todos_sorted = sorted(
+    todos,
+    key=lambda t: (
+        t.get("due_date") or "9999-99-99",
+        PRIORITY_ORDER.get(t.get("priority"), 1),
+    ),
+)
 active_todos = [t for t in todos_sorted if not is_completed(t)]
 completed_todos = [t for t in todos_sorted if is_completed(t)]
 
@@ -207,13 +367,26 @@ def render_todo_list(todo_list: list[dict]) -> None:
                     row = find_row_by_id(todo["id"])
                     if row:
                         worksheet.update_cell(row, 7, "TRUE" if checked else "FALSE")
+                        if checked:
+                            delete_calendar_event(todo.get("calendar_event_id", ""))
+                            worksheet.update_cell(row, 11, "")
+                        else:
+                            event_id = create_calendar_event(
+                                todo["title"], todo["content"], todo["due_date"]
+                            )
+                            worksheet.update_cell(row, 11, event_id)
                     st.rerun()
                 title_cols[1].markdown(
                     render_title_html(todo["title"], completed), unsafe_allow_html=True
                 )
 
                 st.write(todo["content"])
-                st.markdown(format_due_date(todo["due_date"], completed))
+                meta_parts = [format_due_date(todo["due_date"], completed)]
+                if todo.get("priority"):
+                    meta_parts.append(priority_label(todo["priority"]))
+                if todo.get("category"):
+                    meta_parts.append(f"🏷️ {todo['category']}")
+                st.markdown(" ｜ ".join(p for p in meta_parts if p))
                 st.caption(f"登録日時 : {format_created_at(todo.get('created_at', ''))}")
 
             with button_col:
@@ -232,6 +405,7 @@ def render_todo_list(todo_list: list[dict]) -> None:
                     ):
                         row = find_row_by_id(todo["id"])
                         if row:
+                            delete_calendar_event(todo.get("calendar_event_id", ""))
                             worksheet.delete_rows(row)
                         st.session_state.confirm_delete_id = None
                         st.rerun()

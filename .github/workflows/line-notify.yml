@@ -1,0 +1,27 @@
+name: LINE Todoリマインド
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 06:00 JST
+  workflow_dispatch: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install gspread google-auth requests
+
+      - name: Send LINE reminder
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          TODO_USER_EMAIL: ${{ secrets.TODO_USER_EMAIL }}
+        run: python scripts/notify_line.py
