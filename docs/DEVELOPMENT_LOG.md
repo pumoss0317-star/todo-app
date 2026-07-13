@@ -117,6 +117,29 @@ LINE Notifyは2025年3月末にサービス終了済みのため、後継の **L
    - `TODO_USER_EMAIL`: 通知対象にする自分のGoogleアカウントのメールアドレス
 5. `.github/workflows/line-notify.yml`が毎日06:00(JST)に`scripts/notify_line.py`を実行し、期限切れ・期限3日以内の未完了Todoをまとめて通知する（`workflow_dispatch`で手動実行も可能）。
 
-## 6. 今後の課題（未着手）
+## 6. 外部セットアップの完了（2026-07-13）
 
-- 特になし（2026-07-04時点で要望は全て反映済み）
+「5. 追加機能」で実装したGoogleカレンダー連携・LINE通知のうち、LINE通知の外部セットアップを完了し、実際の動作確認まで行った。
+
+### 実施内容
+
+1. `.streamlit/secrets.toml`から`gcp_service_account`セクションと`sheets.spreadsheet_id`をPythonの`tomllib`で読み込み、`gh secret set`で直接GitHub Actions Secretsに登録するスクリプトを作成・実行（値をチャットや標準出力に表示せず転送）。
+2. LINEチャネルアクセストークンを発行し、`GCP_SERVICE_ACCOUNT_JSON`・`SPREADSHEET_ID`・`LINE_CHANNEL_ACCESS_TOKEN`・`TODO_USER_EMAIL`の4つのSecretsが揃ったことを`gh secret list`で確認。
+3. `gh workflow run line-notify.yml`でワークフローを手動実行し、ログに「2件のTodoをLINEに通知しました。」の出力があることを確認して正常動作を確認した（run id: `29219419187`）。
+
+### LINEチャネル作成でのつまずきポイント
+
+LINE公式アカウントをLINE Official Account Manager（`manager.line.biz`）側で先に作成した場合、その時点ではLINE Developersコンソール（`developers.line.biz`）にチャネルとして表示されない。以下の操作でMessaging APIを有効化して初めてDevelopersコンソール側に現れる。
+
+1. Official Account Managerの画面右上の設定（歯車アイコン）を開く
+2. 左メニューから「Messaging API」を選択
+3. 「Messaging APIを利用する」ボタンを押し、プロバイダーを選択（未作成なら新規作成）して有効化
+4. これでDevelopersコンソールの同プロバイダー配下にチャネルが表示され、「Messaging API設定」タブからチャネルアクセストークン（長期）を発行できる
+
+### 未確認事項
+
+- Googleカレンダー連携について、ローカルの`.streamlit/secrets.toml`には`[calendar] calendar_id`が設定済みであることを確認したが、本番環境（Streamlit Community Cloud）側のSecretsに同じ内容が反映されているかは未確認。Streamlit Cloud管理画面はブラウザ操作が必要なため、次回確認が必要。
+
+## 7. 今後の課題（未着手）
+
+- Streamlit Cloud本番環境のSecretsに`[calendar]`セクションが反映されているかの確認

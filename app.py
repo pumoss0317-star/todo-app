@@ -311,10 +311,26 @@ if is_editing and st.button("編集をキャンセル"):
 st.subheader("Todo一覧")
 todos = get_my_todos()
 
-categories = sorted({t["category"] for t in todos if t.get("category")})
-selected_categories = st.multiselect("カテゴリで絞り込み", categories)
+search_query = st.text_input("タイトル・内容で検索", placeholder="キーワードを入力")
+
+filter_col1, filter_col2 = st.columns(2)
+with filter_col1:
+    categories = sorted({t["category"] for t in todos if t.get("category")})
+    selected_categories = st.multiselect("カテゴリで絞り込み", categories)
+with filter_col2:
+    selected_priorities = st.multiselect("重要度で絞り込み", PRIORITY_OPTIONS)
+
+if search_query:
+    query = search_query.lower()
+    todos = [
+        t
+        for t in todos
+        if query in t.get("title", "").lower() or query in t.get("content", "").lower()
+    ]
 if selected_categories:
     todos = [t for t in todos if t.get("category") in selected_categories]
+if selected_priorities:
+    todos = [t for t in todos if t.get("priority") in selected_priorities]
 
 todos_sorted = sorted(
     todos,
