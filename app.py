@@ -377,7 +377,10 @@ def render_todo_list(todo_list: list[dict]) -> None:
             with content_col:
                 title_cols = st.columns([0.6, 9], vertical_alignment="center")
                 checked = title_cols[0].checkbox(
-                    "", value=completed, key=f"done_{todo['id']}"
+                    "完了",
+                    value=completed,
+                    key=f"done_{todo['id']}",
+                    label_visibility="collapsed",
                 )
                 if checked != completed:
                     row = find_row_by_id(todo["id"])
